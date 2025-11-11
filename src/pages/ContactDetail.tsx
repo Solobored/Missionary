@@ -365,7 +365,7 @@ export default function ContactDetail() {
                         <CardContent className="pt-4">
                           <div className="flex justify-between items-start mb-2">
                             <div className="text-sm text-muted-foreground">
-                              {note.author.name} • {format(new Date(note.createdAt), 'MMM d, yyyy h:mm a')}
+                            {note.author?.name || 'Demo Admin'} • {format(new Date(note.createdAt), 'MMM d, yyyy h:mm a')}
                             </div>
                             <Button
                               variant="ghost"

@@ -2,42 +2,48 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 const SALT_ROUNDS = 10;
 
-// Demo admin credentials (for testing purposes)
+// 🔹 Fixed ObjectId for the demo admin (must match demo.js)
+const DEMO_ADMIN_ID = new mongoose.Types.ObjectId('64b5d5e6f0c2f1b2a3c4d5e6');
+
+// 🔹 Demo admin credentials (not stored in DB)
 const DEMO_ADMIN = {
+  _id: DEMO_ADMIN_ID,
   email: 'admin@missionconnect.com',
   password: 'admin123',
   name: 'Admin User',
-  id: 'demo-admin-id'
+  isDemo: true
 };
 
+// --- JWT Helpers ---
 const signAccessToken = (user) => {
-  return jwt.sign({ id: user._id || user.id }, process.env.JWT_SECRET, { 
-    expiresIn: process.env.JWT_EXPIRES_IN || '15m' 
+  const userId = user._id ? user._id.toString() : user.id?.toString();
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || '15m',
   });
 };
 
 const signRefreshToken = (user) => {
-  return jwt.sign({ id: user._id || user.id }, process.env.JWT_SECRET, { 
-    expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '7d' 
+  const userId = user._id ? user._id.toString() : user.id?.toString();
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   });
 };
 
-// Register
+// --- REGISTER ---
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    if (!name || !email || !password) {
+    if (!name || !email || !password)
       return res.status(400).json({ error: 'Missing required fields' });
-    }
 
     const existing = await User.findOne({ email });
-    if (existing) {
+    if (existing)
       return res.status(400).json({ error: 'Email already in use' });
-    }
 
     const hashed = await bcrypt.hash(password, SALT_ROUNDS);
     const user = new User({ name, email, password: hashed });
@@ -50,41 +56,36 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login (with demo admin support)
+// --- LOGIN ---
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
+    if (!email || !password)
       return res.status(400).json({ error: 'Missing email or password' });
-    }
 
-    // Check for demo admin login
+    // 🔹 Demo admin login
     if (email === DEMO_ADMIN.email && password === DEMO_ADMIN.password) {
       const accessToken = signAccessToken(DEMO_ADMIN);
       const refreshToken = signRefreshToken(DEMO_ADMIN);
 
-      return res.json({ 
-        accessToken, 
-        refreshToken, 
-        user: { 
-          id: DEMO_ADMIN.id, 
-          name: DEMO_ADMIN.name, 
+      return res.json({
+        accessToken,
+        refreshToken,
+        user: {
+          _id: DEMO_ADMIN._id,
+          name: DEMO_ADMIN.name,
           email: DEMO_ADMIN.email,
-          isDemo: true
-        } 
+          isDemo: true,
+        },
       });
     }
 
-    // Regular user login
+    // 🔹 Regular user login
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
+    if (!user) return res.status(400).json({ error: 'Invalid credentials' });
 
     const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
+    if (!match) return res.status(400).json({ error: 'Invalid credentials' });
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user);
@@ -92,10 +93,10 @@ router.post('/login', async (req, res) => {
     user.refreshTokens.push({ token: refreshToken });
     await user.save();
 
-    return res.json({ 
-      accessToken, 
-      refreshToken, 
-      user: { id: user._id, name: user.name, email: user.email } 
+    return res.json({
+      accessToken,
+      refreshToken,
+      user: { _id: user._id, name: user.name, email: user.email },
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -103,32 +104,27 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Refresh token
+// --- REFRESH TOKEN ---
 router.post('/refresh', async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) {
+    if (!refreshToken)
       return res.status(400).json({ error: 'No refresh token provided' });
-    }
 
     const payload = jwt.verify(refreshToken, process.env.JWT_SECRET);
-    
-    // Handle demo admin refresh
-    if (payload.id === DEMO_ADMIN.id) {
+
+    // 🔹 Handle demo admin refresh
+    if (payload.id === DEMO_ADMIN_ID.toString()) {
       const accessToken = signAccessToken(DEMO_ADMIN);
       return res.json({ accessToken });
     }
 
-    // Regular user refresh
+    // 🔹 Regular user refresh
     const user = await User.findById(payload.id);
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid refresh token' });
-    }
+    if (!user) return res.status(401).json({ error: 'Invalid refresh token' });
 
-    const found = user.refreshTokens.find(rt => rt.token === refreshToken);
-    if (!found) {
-      return res.status(401).json({ error: 'Invalid refresh token' });
-    }
+    const found = user.refreshTokens.find((rt) => rt.token === refreshToken);
+    if (!found) return res.status(401).json({ error: 'Invalid refresh token' });
 
     const accessToken = signAccessToken(user);
     return res.json({ accessToken });
@@ -138,29 +134,32 @@ router.post('/refresh', async (req, res) => {
   }
 });
 
-// Logout
+// --- LOGOUT ---
 router.post('/logout', async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) {
+    if (!refreshToken)
       return res.status(400).json({ error: 'No refresh token provided' });
-    }
 
     const payload = jwt.verify(refreshToken, process.env.JWT_SECRET);
-    
-    // Handle demo admin logout
-    if (payload.id === DEMO_ADMIN.id) {
-      return res.json({ message: 'Logged out successfully' });
+
+    // 🔹 Handle demo admin logout
+    if (payload.id === DEMO_ADMIN_ID.toString()) {
+      return res.json({ message: 'Demo admin logged out successfully' });
     }
 
-    // Regular user logout
+    // 🔹 Regular user logout
     const user = await User.findById(payload.id);
     if (user) {
-      user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== refreshToken);
+      user.refreshTokens = user.refreshTokens.filter(
+        (rt) => rt.token !== refreshToken
+      );
       await user.save();
     }
+
     return res.json({ message: 'Logged out successfully' });
   } catch (err) {
+    console.error('Logout error:', err);
     return res.json({ message: 'Logged out' });
   }
 });

@@ -1,13 +1,16 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { Contact, Note, Visit } from '../models/index.js';
 import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Demo data for admin account
+// Use a consistent ObjectId for the demo admin user
+const DEMO_ADMIN_ID = new mongoose.Types.ObjectId('64b5d5e6f0c2f1b2a3c4d5e6');
+
 const DEMO_CONTACTS = [
   {
-    firstName: 'John',
+    firstName: 'Joseph',
     lastName: 'Smith',
     phone: '(555) 123-4567',
     address: '123 Main Street, Salt Lake City, UT 84101',
@@ -59,73 +62,69 @@ const DEMO_CONTACTS = [
 ];
 
 const DEMO_NOTES = [
-  { contactIndex: 0, text: 'First visit went well. Very interested in learning more about the gospel. Agreed to read Book of Mormon.' },
-  { contactIndex: 0, text: 'Second visit - discussed the Plan of Salvation. Asked great questions about eternal families.' },
-  { contactIndex: 1, text: 'Teaching the family in Spanish. All members are progressing well. Children are excited about baptism.' },
-  { contactIndex: 1, text: 'Attended church for the first time. Met with the bishop and ward members. Very positive experience.' },
-  { contactIndex: 2, text: 'Met at local coffee shop. Discussed the Restoration. Gave him a Book of Mormon and pamphlet.' },
-  { contactIndex: 4, text: 'Family is preparing for baptism next month. Working through final lessons and answering questions.' }
+  { contactIndex: 0, text: 'First visit went well. Very interested in learning more about the gospel.' },
+  { contactIndex: 0, text: 'Second visit - discussed the Plan of Salvation. Asked great questions.' },
+  { contactIndex: 1, text: 'Teaching the family in Spanish. All members are progressing well.' },
+  { contactIndex: 1, text: 'Attended church for the first time. Very positive experience.' },
+  { contactIndex: 2, text: 'Met at local coffee shop. Discussed the Restoration.' },
+  { contactIndex: 4, text: 'Family is preparing for baptism next month.' }
 ];
 
 const DEMO_VISITS = [
-  { contactIndex: 0, datetime: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), notes: 'Lesson 3: The Gospel of Jesus Christ' },
-  { contactIndex: 1, datetime: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), notes: 'Lesson 4: The Commandments. Bring Spanish materials.' },
-  { contactIndex: 2, datetime: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), notes: 'Follow-up visit. See if he read the Book of Mormon.' },
-  { contactIndex: 4, datetime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), notes: 'Pre-baptism interview preparation' }
+  { contactIndex: 0, datetime: new Date(Date.now() + 2 * 86400000), notes: 'Lesson 3: The Gospel of Jesus Christ' },
+  { contactIndex: 1, datetime: new Date(Date.now() + 3 * 86400000), notes: 'Lesson 4: The Commandments (Spanish materials)' },
+  { contactIndex: 2, datetime: new Date(Date.now() + 5 * 86400000), notes: 'Follow-up visit: Book of Mormon reading' },
+  { contactIndex: 4, datetime: new Date(Date.now() + 7 * 86400000), notes: 'Pre-baptism interview prep' }
 ];
 
-// Initialize demo data for admin account
+// Initialize demo data
 router.post('/init', auth, async (req, res) => {
   try {
-    // Only allow demo admin to initialize
-    if (!req.user.isDemo) {
+    // Allow only demo admin
+    if (!req.user?.isDemo) {
       return res.status(403).json({ error: 'Only demo admin can initialize demo data' });
     }
 
+    const ownerId = req.user._id || DEMO_ADMIN_ID;
+
     // Check if demo data already exists
-    const existingContacts = await Contact.find({ owner: req.user._id });
-    if (existingContacts.length > 0) {
-      return res.json({ 
-        message: 'Demo data already exists', 
-        contactCount: existingContacts.length 
+    const existing = await Contact.find({ owner: ownerId });
+    if (existing.length > 0) {
+      return res.json({
+        message: 'Demo data already exists',
+        contactCount: existing.length
       });
     }
 
     // Create demo contacts
     const createdContacts = [];
-    for (const contactData of DEMO_CONTACTS) {
-      const contact = new Contact({
-        ...contactData,
-        owner: req.user._id
-      });
-      await contact.save();
-      createdContacts.push(contact);
+    for (const c of DEMO_CONTACTS) {
+      const newContact = await Contact.create({ ...c, owner: ownerId });
+      createdContacts.push(newContact);
     }
 
-    // Create demo notes
+    // Create notes
     for (const noteData of DEMO_NOTES) {
       const contact = createdContacts[noteData.contactIndex];
-      const note = new Note({
+      await Note.create({
         contact: contact._id,
-        author: req.user._id,
+        author: ownerId,
         text: noteData.text
       });
-      await note.save();
     }
 
-    // Create demo visits
+    // Create visits
     for (const visitData of DEMO_VISITS) {
       const contact = createdContacts[visitData.contactIndex];
-      const visit = new Visit({
+      await Visit.create({
         contact: contact._id,
-        user: req.user._id,
+        user: ownerId,
         datetime: visitData.datetime,
         notes: visitData.notes
       });
-      await visit.save();
     }
 
-    return res.json({ 
+    return res.json({
       message: 'Demo data initialized successfully',
       contactCount: createdContacts.length,
       noteCount: DEMO_NOTES.length,
@@ -140,14 +139,15 @@ router.post('/init', auth, async (req, res) => {
 // Clear demo data
 router.delete('/clear', auth, async (req, res) => {
   try {
-    // Only allow demo admin to clear
-    if (!req.user.isDemo) {
+    if (!req.user?.isDemo) {
       return res.status(403).json({ error: 'Only demo admin can clear demo data' });
     }
 
-    await Contact.deleteMany({ owner: req.user._id });
-    await Note.deleteMany({ author: req.user._id });
-    await Visit.deleteMany({ user: req.user._id });
+    const ownerId = req.user._id || DEMO_ADMIN_ID;
+
+    await Contact.deleteMany({ owner: ownerId });
+    await Note.deleteMany({ author: ownerId });
+    await Visit.deleteMany({ user: ownerId });
 
     return res.json({ message: 'Demo data cleared successfully' });
   } catch (err) {
